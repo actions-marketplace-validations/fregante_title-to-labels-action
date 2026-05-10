@@ -100,3 +100,14 @@ test('Adds specified label', async () => {
 		labels: ['enhancement'],
 	});
 });
+
+test('Returns cleaned title and label when keyword matches (caller decides whether to use cleaned title)', async () => {
+	const output = parseTitle('Meta: some discussion', {
+		keywords: ['meta'],
+		labels: ['meta'],
+	});
+	expect(output).toMatchObject({
+		title: 'Some discussion',
+		labels: ['meta'],
+	});
+});

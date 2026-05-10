@@ -18,9 +18,11 @@ function parseList(string) {
 function getInputs() {
 	const keywords = parseList(getInput('keywords'));
 	const labels = parseList(getInput('labels'));
+	const updateTitle = getInput('update-title').toLowerCase() !== 'false';
 	debug(`Received keywords: ${keywords.join(', ')}`);
 	debug(`Received labels: ${labels.join(', ')}`);
-	return {keywords, labels};
+	debug(`Update title: ${updateTitle}`);
+	return {keywords, labels, updateTitle};
 }
 
 async function run() {
@@ -33,9 +35,10 @@ async function run() {
 	}
 
 	const conversation = event.issue || event.pull_request;
+	const {keywords, labels: inputLabels, updateTitle} = getInputs();
 	let update = {};
 	if (getInput('keywords')) {
-		update = parseTitle(conversation.title, getInputs());
+		update = parseTitle(conversation.title, {keywords, labels: inputLabels});
 	} else if (getInput('labels')) {
 		throw new Error('Labels can’t be set without keywords. Set neither, set only keywords, or set both.');
 	} else {
@@ -43,27 +46,44 @@ async function run() {
 		update = parseTitleWithDefaults(conversation.title);
 	}
 
-	const {title, labels} = update;
+	const {title: parsedTitle, labels} = update;
+	const title = updateTitle ? parsedTitle : conversation.title;
 
-	if (conversation.title === title) {
+	const titleChanged = conversation.title !== title;
+	const hasLabels = labels.length > 0;
+
+	if (!titleChanged && !hasLabels) {
 		info('No title changes needed');
 		return;
 	}
 
-	info(`Changing title from "${conversation.title}" to ${title}`);
-	info(`Adding labels: ${labels.join(', ')}`);
+	const actions = [];
+
+	if (titleChanged) {
+		info(`Changing title from "${conversation.title}" to ${title}`);
+	}
+
+	if (hasLabels) {
+		info(`Adding labels: ${labels.join(', ')}`);
+	}
 
 	const octokit = new Octokit();
 	const issue_number = conversation.number;
 	const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
-	await Promise.all([
-		octokit.issues.addLabels({
+
+	if (hasLabels) {
+		actions.push(octokit.issues.addLabels({
 			owner, repo, labels, issue_number,
-		}),
-		octokit.issues.update({
+		}));
+	}
+
+	if (titleChanged) {
+		actions.push(octokit.issues.update({
 			owner, repo, issue_number, title,
-		}),
-	]);
+		}));
+	}
+
+	await Promise.all(actions);
 }
 
 // eslint-disable-next-line unicorn/prefer-top-level-await

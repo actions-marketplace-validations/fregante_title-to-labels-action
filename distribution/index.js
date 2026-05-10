@@ -56483,9 +56483,11 @@ function parseList(string) {
 function getInputs() {
 	const keywords = parseList((0,core.getInput)('keywords'));
 	const labels = parseList((0,core.getInput)('labels'));
+	const updateTitle = (0,core.getInput)('update-title').toLowerCase() !== 'false';
 	(0,core.debug)(`Received keywords: ${keywords.join(', ')}`);
 	(0,core.debug)(`Received labels: ${labels.join(', ')}`);
-	return {keywords, labels};
+	(0,core.debug)(`Update title: ${updateTitle}`);
+	return {keywords, labels, updateTitle};
 }
 
 async function run() {
@@ -56498,9 +56500,10 @@ async function run() {
 	}
 
 	const conversation = index_event.issue || index_event.pull_request;
+	const {keywords, labels: inputLabels, updateTitle} = getInputs();
 	let update = {};
 	if ((0,core.getInput)('keywords')) {
-		update = parseTitle(conversation.title, getInputs());
+		update = parseTitle(conversation.title, {keywords, labels: inputLabels});
 	} else if ((0,core.getInput)('labels')) {
 		throw new Error('Labels can’t be set without keywords. Set neither, set only keywords, or set both.');
 	} else {
@@ -56508,27 +56511,44 @@ async function run() {
 		update = parseTitleWithDefaults(conversation.title);
 	}
 
-	const {title, labels} = update;
+	const {title: parsedTitle, labels} = update;
+	const title = updateTitle ? parsedTitle : conversation.title;
 
-	if (conversation.title === title) {
+	const titleChanged = conversation.title !== title;
+	const hasLabels = labels.length > 0;
+
+	if (!titleChanged && !hasLabels) {
 		(0,core.info)('No title changes needed');
 		return;
 	}
 
-	(0,core.info)(`Changing title from "${conversation.title}" to ${title}`);
-	(0,core.info)(`Adding labels: ${labels.join(', ')}`);
+	const actions = [];
+
+	if (titleChanged) {
+		(0,core.info)(`Changing title from "${conversation.title}" to ${title}`);
+	}
+
+	if (hasLabels) {
+		(0,core.info)(`Adding labels: ${labels.join(', ')}`);
+	}
 
 	const octokit = new dist_bundle_Octokit();
 	const issue_number = conversation.number;
 	const [owner, repo] = external_node_process_namespaceObject.env.GITHUB_REPOSITORY.split('/');
-	await Promise.all([
-		octokit.issues.addLabels({
+
+	if (hasLabels) {
+		actions.push(octokit.issues.addLabels({
 			owner, repo, labels, issue_number,
-		}),
-		octokit.issues.update({
+		}));
+	}
+
+	if (titleChanged) {
+		actions.push(octokit.issues.update({
 			owner, repo, issue_number, title,
-		}),
-	]);
+		}));
+	}
+
+	await Promise.all(actions);
 }
 
 // eslint-disable-next-line unicorn/prefer-top-level-await
